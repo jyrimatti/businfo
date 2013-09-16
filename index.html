@@ -1,0 +1,378 @@
+<html>
+<head>
+   <meta charset="utf-8">
+   <meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+   <title>Bus info</title>
+   <link href='http://fonts.googleapis.com/css?family=Merriweather' rel='stylesheet' type='text/css' />
+   <link href='/bus/style.css' rel='stylesheet' type='text/css' />
+</head>
+<body onload="initialize();">
+   <div id="content">
+       <div id="notifications"></div>
+       <div id="stop" class="hidden">
+          <h3></h3>
+          <ul class="tabs">
+              <li data-bind="gps" class="gps selected"></li>
+              <li data-bind="departures" class="departures"></li>
+              <li data-bind="lines" class="lines"></li>
+          </ul>
+          <table id="gps"></table>
+          <table id="departures" class="hidden"></table>
+          <table id="lines" class="hidden"></table>
+       </div>
+       <div id="map-canvas"><p class="spinner"></p></div>
+
+       <div id="templates" style="display: none;">
+          <table>
+              <tr data-bind="noDepartureData"><td><em>no departure data</em></td></tr>
+              <tr data-bind="spinner"><th class="spinner">&nbsp;</th></tr>
+              <tr data-bind="etd"><th data-bind="code"></th><td data-bind="time"></td><td data-bind="estimate"><em>(<span></span>min)</em></td></tr>
+              <tr data-bind="noLineData"><td><em>no line data</em></td></tr>
+              <tr data-bind="showLine">
+                  <td class="code"><a href="#showLine" onclick="updateLineRoute(this.textContent)"></a></td>
+                  <td class="text"></td>
+              </tr>
+          </table>
+       </div>
+    </div>
+
+   <script type="text/javascript" src="http://code.jquery.com/jquery-1.10.1.min.js"></script>
+   <script type="text/javascript" src="http://code.jquery.com/mobile/1.3.1/jquery.mobile-1.3.1.min.js"></script>
+   <script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC1HE7ysGzolLTIP3ZN1JBDmsfbFh54NeY&sensor=true"></script>
+   <script type="text/javascript" src="/bus/domhelper.js"></script>
+   <script type="text/javascript" src="/bus/xmlhelper.js"></script>
+   <script type="text/javascript" src="/bus/logger.js"></script>
+   <script type="text/javascript" src="/bus/sirihelper.js"></script>
+   <script type="text/javascript" src="/bus/cgihelper.js"></script>
+   <script type="text/javascript" src="/bus/gmapshelper.js"></script>
+   <script type="text/javascript" src="/bus/uihelper.js"></script>
+   <script type="text/javascript" src="/bus/messaginghelper.js"></script>
+   <script type="text/javascript">
+      var tklConfig = {
+          url: 'http://lahteenmaki.net/xdm?http://api.publictransport.tampere.fi/1_0_2/',
+          username: 'businfo',
+          password: 'businfo'
+      }
+      var hslConfig = {
+          url: 'http://lahteenmaki.net/xdm?http://api.reittiopas.fi/hsl/prod/',
+          username: 'businfo',
+          password: 'businfo'
+      }
+      var siriConfig = {
+          application_id: 'YOUR_APPLICATION_ID',
+          url: 'http://lahteenmaki.net/xdm?https://siri.ij2010.tampere.fi/ws',
+          username: 'its_factory_temp',
+          password: 'ITS4devN'
+      }
+      var tampereCoordinates = {latitude: 61.4981, longitude: 23.760};
+      var helsinkiCoordinates = {latitude: 60.1675763, longitude: 24.9417421}
+
+      var messageUpdateIntervalMs = 1000*60*5;
+
+      var state = {
+          myLocation: null,
+          me: null,
+          followMe: true,
+          
+          lastFetch: null,
+          stopsFetchedFor: [],
+          stopMarkers: {},
+          busMarkers: {},
+          lineShapes: [],
+          selected: null,
+          updatingBuses: false,
+          shownMessages: {}
+      };
+
+      var icons = {
+          number: function(num) {
+              return 'bus/icons/number_' + num + '.png';
+          },
+          stop: 'bus/icons/busstop.png'
+      };
+      var distanceBetween = function(coord1, coord2) {
+          return Math.sqrt(Math.pow(coord1.latitude - coord2.latitude, 2) + Math.pow(coord1.longitude - coord2.longitude, 2));
+      };
+      var nearerToTampere = function(loc) {
+          var dTampere = distanceBetween(loc, tampereCoordinates);
+          var dHelsinki = distanceBetween(loc, helsinkiCoordinates);
+          return dTampere < dHelsinki;
+      };
+
+      var dom = domhelper();
+      var xml = xmlhelper();
+      var logger = logger();
+      var ui = uihelper();
+
+      var body = function() {return dom.process(document.getElementById('content')); };
+      var templates = body().templates;
+
+      var maps = gmapshelper(body()['map-canvas']());
+      var messaging = messaginghelper(body().notifications(), ui);
+
+      var siriAPI = sirihelper(xml, logger, siriConfig);
+      var tklAPI = cgihelper(logger, tklConfig);
+      var hslAPI = cgihelper(logger, hslConfig);
+      var busAPI = function() {
+          return nearerToTampere(maps.center()) ? tklAPI : hslAPI;
+      };
+
+      body().stop.tabs.li.forEach(function(_) {
+          _().onclick = function(e) {
+              if (!this.classList.contains('selected')) {
+                  var selected = body().stop.tabs.selected();
+                  selected.classList.remove('selected');
+                  this.classList.add('selected');
+                  ui.hide(document.getElementById(selected.dataset.bind));
+                  ui.show(document.getElementById(this.dataset.bind));
+              }
+          };
+      });
+
+      var updateLineRoute = function(code) {
+          state.lineShapes.forEach(maps.remove);
+          busAPI().get(busAPI().LINES, {p: '10000001', query: code}, function(json) {
+              json = json == '' ? [] : json;
+              state.lineShapes = json.filter(function(_) {return _.code == code;}).map(function(_) {
+                  var coords = busAPI().parseLineShape(_.line_shape);
+                  logger.log('Drawing polyline with coords: ' + coords);
+                  return maps.newPolyline(coords);
+              });
+          });
+          return false;
+      }
+
+      var updateStopBuses = function(code) {
+          body().stop.departures().innerHTML = templates.table.tbody.spinner({});
+          busAPI().get(busAPI().STOP, {p: '00000010001', code: code}, function(json) {
+              json = json instanceof Array ? json[0] : json;
+            
+              if (!json.departures || json.departures.length == 0) {
+                  body().stop.departures().innerHTML = templates.table.tbody.noDepartureData({});
+              } else {
+                  var rows = json.departures.map(function (_) {
+                      var stamp = busAPI().parseDate(_.date);
+                      var time = busAPI().parseTime(_.time);
+                      stamp.setHours(time.hours);
+                      stamp.setMinutes(time.minutes);
+                      var now = new Date();
+                      var etd = Math.floor((stamp - now)/1000/60 + time.days*24*60);
+                      etd = etd < 0 ? 0 : etd;
+                      return templates.table.tbody.etd({
+                          code: _.code,
+                          time: time.toString(),
+                          estimate: {
+                              em: {
+                                  span: etd
+                              }
+                          }
+                      });
+                  });
+                  body().stop.departures().innerHTML = rows.join('');
+              }
+
+              if (!json.lines || json.lines.length == 0) {
+                  body().stop.lines().innerHTML = templates.table.tbody.noLineData({});
+              } else {
+                  var rows = json.lines.map(function(_) {
+                      var lineCode = _.substr(0, _.indexOf(':'));
+                      var route = _.substr(_.indexOf(':')+1); 
+                      return templates.table.tbody.showLine({
+                          code: {
+                              a: lineCode
+                          },
+                          text: route
+                      });
+                  });
+                  body().stop.lines().innerHTML = rows.join('');
+              }
+          });
+
+          siriAPI.get(siriAPI.STOP(code), function(_) {
+              var visits = _.Siri.ServiceDelivery.StopMonitoringDelivery.MonitoredStopVisit;
+              if (!visits) {
+                  body().stop.gps().innerHTML = templates.table.tbody.noDepartureData({});
+              } else {
+                  visits = visits instanceof Array ? visits : [visits];
+                  var rows = visits.map(function(_) {
+                      var lineRef = _.MonitoredVehicleJourney.LineRef;
+                      var origin = _.MonitoredVehicleJourney.OriginName;
+                      var destination = _.MonitoredVehicleJourney.DestinationName;
+                      var vehicleRef = _.MonitoredVehicleJourney.VehicleRef;
+
+                      var stamp = new Date(_.MonitoredVehicleJourney.MonitoredCall.ExpectedDepartureTime);
+                      var now = new Date();
+                      var etd = Math.floor((stamp.getTime() - now.getTime())/1000/60);
+                      
+                      return templates.table.tbody.etd({
+                          code: lineRef,
+                          time: stamp.getHours() + ':' + stamp.getMinutes(),
+                          estimate: {
+                              em: {
+                                  span: etd
+                              }
+                          }
+                      });
+                  });
+                  body().stop.gps().innerHTML = rows.join('');
+              }
+          });
+
+          setTimeout(function() {
+              if (state.selected.code == code) {
+                  updateStopBuses(code);
+              }
+          }, 30000);
+      };
+
+      var updateNearByBusStops = function() {
+          var bounds = maps.bounds();
+          var dLatitude = bounds[0].latitude - bounds[1].latitude;
+          var dLongitude = bounds[0].longitude - bounds[1].longitude;
+          var center = {latitude: bounds[1].latitude - dLatitude, longitude: bounds[1].longitude - dLongitude};
+          var diameter = Math.max(Math.abs(dLatitude), Math.abs(dLongitude));
+          var bbox = [bounds[0].longitude, bounds[0].latitude, bounds[1].longitude, bounds[1].latitude].join(',');
+          if (state.lastFetch == null || state.stopsFetchedFor.indexOf(bbox) == -1 && shouldFetchStops(bounds, state.lastFetch, maps.center())) {
+              state.lastFetch = maps.center();
+              state.stopsFetchedFor.push(bbox);
+              busAPI().get(busAPI().STOPS_AREA, {limit: 500, center_coordinate: center.longitude + ',' + center.latitude, diameter: 5000}, function(json) {
+                  json = json == '' ? [] : json;
+                  json.forEach(function(stop) {
+                      if (!state.stopMarkers[stop.code]) {
+                          var coords = busAPI().parseCoordinates(stop.coords);
+                          var stopMarker = maps.newMarker(stop.code + ' ' + stop.name, coords, {icon: icons.stop});
+                          stopMarker.code = stop.code;
+                          state.stopMarkers[stop.code] = stopMarker;
+                          maps.on('click', stopMarker, function(e) {
+                              e.stop();
+                              if (state.selected) maps.stopAnimation(state.selected);
+                              state.selected = stopMarker;
+                              maps.animate(stopMarker);
+                              body().stop.departures().innerHTML = '';
+                              body().stop.H3().innerHTML = stop.code + ' ' + stop.name;
+                              ui.show(body().stop());
+                              messaging.addInfoOnce('Swipe right to hide stop info.');
+                              updateStopBuses(stop.code);
+                          });
+                      }
+                  });
+              });
+          }
+      };
+
+      var updateBuses = function() {
+          if (!state.updatingBuses && nearerToTampere(maps.center())) {
+              state.updatingBuses = true;
+              try {
+                siriAPI.get(siriAPI.ALL_VEHICLES(), function(d) {
+                    var activity = d.Siri.ServiceDelivery.VehicleMonitoringDelivery.VehicleActivity
+                    if (!(activity instanceof Array))
+                        activity = [activity];
+                    activity.forEach(function(a) {
+                        var vehicle = a.MonitoredVehicleJourney.VehicleRef;
+                        var line = a.MonitoredVehicleJourney.LineRef;
+                        var direction = a.MonitoredVehicleJourney.DirectionRef;
+                        var coords = a.MonitoredVehicleJourney.VehicleLocation;
+                        var origin = a.MonitoredVehicleJourney.OriginName;
+                        var destination = a.MonitoredVehicleJourney.DestinationName;
+                        var busMarker = state.busMarkers[vehicle];
+                        if (!busMarker) {
+                            logger.log('Adding bus ' + vehicle + ' to: ' + coords);
+                            busMarker = maps.newMarker(line + ': ' + origin + ' -> ' + destination, coords, {icon: icons.number(line.replace(/[^0-9]/g, '')), zIndex: 500});
+                            state.busMarkers[vehicle] = busMarker;
+                            maps.on('click', busMarker, function(e) {
+                                if (state.selected) maps.stopAnimation(state.selected);
+                                maps.animate(busMarker);
+                                state.selected = busMarker;
+                                messaging.addInfo('Line ' + line + ': ' + origin + ' -> ' + destination);
+                                updateLineRoute(line + ' ' + direction);
+                            });
+                        } else {
+                            maps.moveMarker(busMarker, coords);
+                        }
+                    });
+                    state.updatingBuses = false;
+                });
+              } catch (e) {
+                  state.updatingBuses = false;
+                  throw e;
+              }
+          }
+      };
+
+      var showMessage = function(_) {
+          var recordedAt = new Date(_.RecordedAtTime);
+          var validUntil = new Date(_.ValidUntilTime);
+          var text = _.Content;
+          var msgId = _.InfoMessageIdentifier;
+          var validMs = validUntil.getTime() - (new Date()).getTime();
+          if (!state.shownMessages[msgId]) {
+              messaging.addWarn(recordedAt.toLocaleDateString() + ' ' + recordedAt.toLocaleTimeString() + ': ' + text, {delayMs: Math.min(validMs, messageUpdateIntervalMs)});
+              state.shownMessages[msgId] = true;
+          }
+      };
+      var updateMessages = function() {
+          siriAPI.get(siriAPI.ALL_MESSAGES(), function(_) {
+              var msgs = _.Siri.ServiceDelivery.GeneralMessageDelivery.GeneralMessage;
+              if (msgs && !(msgs instanceof Array))
+                  msgs = [msgs];
+              (msgs || []).forEach(showMessage);
+          });
+      };
+
+      var shouldFetchStops = function(mapBounds, c1, c2) {
+          var width = mapBounds[1].longitude - mapBounds[0].longitude;
+          var height = mapBounds[1].latitude - mapBounds[0].latitude;
+          var dx = Math.abs(c1.longitude - c2.longitude);
+          var dy = Math.abs(c1.latitude - c2.latitude);
+          return c1.longitude == c2.longitude && c1.latitude == c2.latitude || dx > width/5.0 || dy > height / 5.0;
+      };
+
+      var updateLocation = function(loc) {
+          logger.log("updateLocation: " + JSON.stringify(loc));
+          if (state.myLocation == null || loc.accuracy < state.myLocation.accuracy || loc.timestamp - state.myLocation.timestamp > 1000) {
+              state.myLocation = loc;
+              maps.moveMarker(state.me, loc.coords);
+              if (state.followMe)
+                  maps.centerTo(state.myLocation ? state.myLocation.coords : tampereCoordinates);
+          }
+      };
+
+      var locationError = function(e) {
+          switch(e.code) {
+              case e.TIMEOUT: {
+                  logger.log(e);
+                  break;
+              }
+              default: messaging.addError(JSON.stringify(e));
+          }
+      };
+
+      $(body().stop()).on('swipe', function() {
+          ui.hideAnimated(body().stop());
+          maps.stopAnimation(state.selected);
+      });
+
+      var initialize = function() {
+          maps.centerTo(state.myLocation ? state.myLocation.coords : tampereCoordinates);
+
+          state.me = maps.newMarker("That's me there!", {latitude: 0, longitude: 0}, {icon: maps.icons.BLUE_DOT, zIndex: 1000});
+
+          maps.on('bounds_changed', maps, updateNearByBusStops);
+          maps.on('zoom_changed', maps, updateNearByBusStops);
+
+          maps.on('click', state.me, function() {state.followMe = true; maps.centerTo(state.myLocation.coords);});
+          maps.on('dragend', maps, function() {state.followMe = false; messaging.addInfoOnce("Click self marker to follow own location.");});
+
+          navigator.geolocation.getCurrentPosition(updateLocation, locationError, {maximumAge:Infinity, timeout:0});
+          navigator.geolocation.watchPosition(updateLocation, locationError);
+          navigator.geolocation.watchPosition(updateLocation, locationError, {enableHighAccuracy: true});
+
+          setInterval(updateMessages, messageUpdateIntervalMs);
+          setInterval(updateBuses, 1000);
+
+          messaging.addInfoOnce('Bus stop data for Tampere/Helsinki.<br>Real-time data for Tampere.<br>Thanks for the icons: http://mapicons.nicolasmollet.com/', {delayMs: 5000});
+      }
+    </script>
+</body>
+</html>

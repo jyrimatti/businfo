@@ -1,0 +1,101 @@
+html { height: 100%; font-family: 'Merriweather', serif; }
+body { height: 100%; margin: 0; padding: 0 }
+#notifications { width: 100%; position: absolute; top: 0; z-index: 9999; }
+#notifications div { width: 90%; margin-left: auto; margin-right: auto; padding: 0.5em; opacity: 0.9; border: 1px; border-radius: 5px; }
+#notifications .error { color: #850B0B; background-color: #FF6B6B; border-color: #850B0B; }
+#notifications .warn { color: #FF7400; background-color: #FFC973; border-color: #FF7400; }
+#notifications .info { color: #0D5385; background-color: #74C6FF; border-color: #0D5385; }
+#map-canvas { height: 100% }
+#stop { padding: 0.5em; min-width: 10em; max-height: 100%; min-height: 25%; overflow-y: scroll; position: absolute; right: 0; bottom: 0; background-color: white; opacity: 0.9; z-index: 5000; border-radius: 0.5em 0 0 0; }
+#stop h3 { width: 100%; margin: 0;}
+table { font-weight: normal; padding-right: 5px; border-collapse: collapse; }
+td { border-left: 1px solid LightGray; }
+td:first-child { border: none; }
+th, td { padding: 0.2em 0.4em; }
+tr { background-color: white; }
+.spinner { background-position: center; background-image: url('spinner.gif'); width: 42px; height: 42px; background-repeat: no-repeat; }
+a { display: block; text-decoration: none; color: #5D6D14; border-radius: 5px; padding: 0.1em; transition: background-color 150.0ms ease 0.0s; }
+a:hover { background-color: #EAF5B9; }
+
+.ui-loader { display: none; }
+
+.hidden { display: none; }
+.hideAnimated {
+    opacity: 0;
+}
+#stop {
+    transition:opacity 750ms, transform 750ms;
+    -ms-transition:opacity 750ms, -ms-transform 750ms;
+    -webkit-transition:opacity 750ms, -webkit-transform 750ms;
+}
+#stop.hideAnimated {
+    transform:rotate3d(0,0,1,90deg);
+    -ms-transform:rotate3d(0,0,1,90deg);
+    -webkit-transform:rotate3d(0,0,1,90deg);
+
+    transform-origin: right bottom 0;
+    -ms-transform-origin: right bottom 0;
+    -webkit-transform-origin: right bottom 0;
+}
+
+#notifications div {
+    -webkit-transition:opacity 750ms, -webkit-transform 750ms;
+    position: relative;
+}
+#notifications div.hideAnimated {
+    transform:translateY(-300%);
+    -ms-transform:translateY(-300%);
+    -webkit-transform:translateY(-300%);
+
+    transform-origin: center top 0;
+    -ms-transform-origin: center top 0;
+    -webkit-transform-origin: center top 0;
+}
+#notifications .close {
+    position: absolute;
+    right: 10px;
+    cursor: pointer;
+}
+.tabs {
+    list-style: none;
+    height: 35px;
+    padding: 0;
+}
+.tabs li {
+    height: 35px;
+    width: 32%;
+    float: left;
+    border: 1px solid Gray;
+    border-bottom: none;
+    border-left: none;
+    border-radius: 0.3em 0.3em 0 0;
+    background-color: LightGray;
+    background-repeat: no-repeat;
+    background-position: center;
+    cursor: pointer;
+    opacity: 0.5;
+    filter: grayscale(100%);
+    -webkit-filter: grayscale(100%);
+    -ms-filter: grayscale(100%); 
+}
+.tabs li:hover {
+    background-color: #EEEEEE;
+}
+.tabs li.selected {
+    opacity: 1;
+    cursor: default;
+    transition: background-color 150.0ms ease 0.0s; 
+    background-color: transparent;
+}
+.tabs li:first-child {
+    border-left: 1px solid LightGray;
+}
+.departures {
+    background-image: url('/bus/icons/book_open.png');
+}
+.gps {
+    background-image: url('/bus/icons/satellite_dish.png');
+}
+.lines {
+    background-image: url('/bus/icons/routing_intersection_right.png');
+}
