@@ -369,7 +369,8 @@
           navigator.geolocation.watchPosition(updateLocation, locationError, {enableHighAccuracy: true});
 
           setInterval(updateMessages, messageUpdateIntervalMs);
-          setInterval(updateBuses, 1000);
+          
+          setTimeout(function() { setInterval(updateBuses, 3000); }, 5000);
 
           messaging.addInfoOnce('Bus stop data for Tampere/Helsinki.<br>Real-time data for Tampere.<br>Thanks for the icons: http://mapicons.nicolasmollet.com/', {delayMs: 5000, escape: false});
       }
