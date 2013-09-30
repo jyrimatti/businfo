@@ -227,20 +227,24 @@
 
       var updateNearByBusStops = function() {
           var bounds = maps.bounds();
-          var dLatitude = bounds[0].latitude - bounds[1].latitude;
-          var dLongitude = bounds[0].longitude - bounds[1].longitude;
-          var center = {latitude: bounds[1].latitude - dLatitude, longitude: bounds[1].longitude - dLongitude};
-          var diameter = Math.max(Math.abs(dLatitude), Math.abs(dLongitude));
+          //var dLatitude = bounds[0].latitude - bounds[1].latitude;
+          //var dLongitude = bounds[0].longitude - bounds[1].longitude;
+          //var center = {latitude: bounds[1].latitude - dLatitude, longitude: bounds[1].longitude - dLongitude};
+          //var diameter = Math.max(Math.abs(dLatitude), Math.abs(dLongitude));
           var bbox = [bounds[0].longitude, bounds[0].latitude, bounds[1].longitude, bounds[1].latitude].join(',');
-          if (state.lastFetch == null || state.stopsFetchedFor.indexOf(bbox) == -1 && shouldFetchStops(bounds, state.lastFetch, maps.center())) {
+          var center = maps.center();
+          if (state.lastFetch == null || state.stopsFetchedFor.indexOf(bbox) == -1 && shouldFetchStops(bounds, state.lastFetch, center)) {
               state.lastFetch = maps.center();
               state.stopsFetchedFor.push(bbox);
-              busAPI().get(busAPI().STOPS_AREA, {limit: 500, center_coordinate: center.longitude + ',' + center.latitude, diameter: 5000}, function(json) {
+              busAPI().get(busAPI().STOPS_AREA, {limit: 500, center_coordinate: center.longitude + ',' + center.latitude, diameter: 2000}, function(json) {
                   json = json == '' ? [] : json;
+                  var opts = {icon: icons.stop};
+                  if (json.length > 10)
+                      opts.animation = null; // iOS7 crashes with many simultaneous animations...
                   json.forEach(function(stop) {
                       if (!state.stopMarkers[stop.code]) {
                           var coords = busAPI().parseCoordinates(stop.coords);
-                          var stopMarker = maps.newMarker(stop.code + ' ' + stop.name, coords, {icon: icons.stop});
+                          var stopMarker = maps.newMarker(stop.code + ' ' + stop.name, coords, opts);
                           stopMarker.code = stop.code;
                           state.stopMarkers[stop.code] = stopMarker;
                           maps.on('click', stopMarker, function(e) {
