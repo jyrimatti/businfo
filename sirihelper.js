@@ -97,7 +97,7 @@ var sirihelper = function(xml, logger, options) {
                 contentType: 'application/xml;charset=UTF-8',
                 timeout: defaultOptions.ajaxTimeoutMs,
                 success: function(d) {
-                    logger.log('Received Siri XML: ' + d);
+                    logger.log('Received Siri XML');
                     onSuccess(xml.toObject(d));
                 },
                 username: defaultOptions.username,

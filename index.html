@@ -20,7 +20,12 @@
           <table id="departures" class="hidden"></table>
           <table id="lines" class="hidden"></table>
        </div>
+       <input id="map-search" class="map-search" type="text" autofocus="autofocus" placeholder="search term or line number" title="Searching by a line number will center the map to the nearest matching bus" style="visibility: hidden" />
        <div id="map-canvas"><p class="spinner"></p></div>
+       <div id="mapchange" class="hideAnimated" title="Change map type">
+          <img data-target="google" src="/bus/google.png" />
+          <img data-target="bing" class="selected" src="/bus/bing.png" />
+       </div>
 
        <div id="templates" style="display: none;">
           <table>
@@ -29,7 +34,7 @@
               <tr data-bind="etd"><th data-bind="code"></th><td data-bind="time"></td><td data-bind="estimate"><em>(<span></span>min)</em></td></tr>
               <tr data-bind="noLineData"><td><em>no line data</em></td></tr>
               <tr data-bind="showLine">
-                  <td class="code"><a href="#showLine" onclick="updateLineRoute(this.textContent)"></a></td>
+                  <td class="code"><a href="#showLine" onclick="updateLineRoute(this.textContent, maps, state.mapState)"></a></td>
                   <td class="text"></td>
               </tr>
           </table>
@@ -38,13 +43,15 @@
 
    <script type="text/javascript" src="http://code.jquery.com/jquery-1.10.1.min.js"></script>
    <script type="text/javascript" src="http://code.jquery.com/mobile/1.3.1/jquery.mobile-1.3.1.min.js"></script>
-   <script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC1HE7ysGzolLTIP3ZN1JBDmsfbFh54NeY&sensor=true"></script>
+   <script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC1HE7ysGzolLTIP3ZN1JBDmsfbFh54NeY&sensor=true&libraries=places"></script>
+   <script charset="UTF-8" type="text/javascript" src="http://ecn.dev.virtualearth.net/mapcontrol/mapcontrol.ashx?v=7.0"></script>
    <script type="text/javascript" src="/bus/domhelper.js"></script>
    <script type="text/javascript" src="/bus/xmlhelper.js"></script>
    <script type="text/javascript" src="/bus/logger.js"></script>
    <script type="text/javascript" src="/bus/sirihelper.js"></script>
    <script type="text/javascript" src="/bus/cgihelper.js"></script>
    <script type="text/javascript" src="/bus/gmapshelper.js"></script>
+   <script type="text/javascript" src="/bus/bingmapshelper.js"></script>
    <script type="text/javascript" src="/bus/uihelper.js"></script>
    <script type="text/javascript" src="/bus/messaginghelper.js"></script>
    <script type="text/javascript">
@@ -64,6 +71,9 @@
           username: 'its_factory_temp',
           password: 'ITS4devN'
       }
+      var siriRTConfig = {
+          url: 'http://lahteenmaki.net/xdm?http://data.itsfactory.fi/siriaccess/vm/json'
+      }
       var tampereCoordinates = {latitude: 61.4981, longitude: 23.760};
       var helsinkiCoordinates = {latitude: 60.1675763, longitude: 24.9417421}
 
@@ -71,15 +81,19 @@
 
       var state = {
           myLocation: null,
-          me: null,
           followMe: true,
           
-          lastFetch: null,
-          stopsFetchedFor: [],
-          stopMarkers: {},
-          busMarkers: {},
-          lineShapes: [],
-          selected: null,
+          lastFetchedLocation: null,
+          
+          mapState: {
+            selected: null,
+            busMarkers: {},
+            stopMarkers: {},
+            lineShapes: [],
+            stopsFetchedFor: [],
+            me: null
+          },
+          
           updatingBuses: false,
           shownMessages: {}
       };
@@ -107,7 +121,7 @@
       var body = function() {return dom.process(document.getElementById('content')); };
       var templates = body().templates;
 
-      var maps = gmapshelper(body()['map-canvas']());
+      var maps;
       var messaging = messaginghelper(body().notifications(), ui);
 
       var siriAPI = sirihelper(xml, logger, siriConfig);
@@ -115,6 +129,21 @@
       var hslAPI = cgihelper(logger, hslConfig);
       var busAPI = function() {
           return nearerToTampere(maps.center()) ? tklAPI : hslAPI;
+      };
+      // itsfactory published all-vehicles RT data also as a separate json service...
+      var siriRTAPI = {
+          get: function(onSuccess) {
+            $.ajax({
+                url: siriRTConfig.url,
+                dataType: 'json',
+                contentType: 'application/json;charset=utf-8',
+                timeout: 7500,
+                success: function(d) {
+                    logger.log('Received Siri JSON');
+                    onSuccess(d);
+                }
+            });
+          }
       };
 
       body().stop.tabs.li.forEach(function(_) {
@@ -129,13 +158,13 @@
           };
       });
 
-      var updateLineRoute = function(code) {
-          state.lineShapes.forEach(maps.remove);
+      var updateLineRoute = function(code, maps, mapState) {
+          mapState.lineShapes.forEach(maps.remove);
           busAPI().get(busAPI().LINES, {p: '10000001', query: code}, function(json) {
               json = json == '' ? [] : json;
-              state.lineShapes = json.filter(function(_) {return _.code == code;}).map(function(_) {
+              mapState.lineShapes = json.filter(function(_) {return _.code == code;}).map(function(_) {
                   var coords = busAPI().parseLineShape(_.line_shape);
-                  logger.log('Drawing polyline with coords: ' + coords);
+                  logger.log('Drawing polyline of length: ' + coords.length);
                   return maps.newPolyline(coords);
               });
           });
@@ -219,38 +248,40 @@
           });
 
           setTimeout(function() {
-              if (state.selected.code == code) {
+              var mapState = state.mapState;
+              if (mapState.selected && mapState.selected.code == code) {
                   updateStopBuses(code);
               }
           }, 30000);
       };
 
-      var updateNearByBusStops = function() {
+      var updateNearByBusStops = function(maps, mapState, lastFetchedLocation) {
           var bounds = maps.bounds();
+          if (!bounds)
+              return lastFetchedLocation;
           //var dLatitude = bounds[0].latitude - bounds[1].latitude;
           //var dLongitude = bounds[0].longitude - bounds[1].longitude;
           //var center = {latitude: bounds[1].latitude - dLatitude, longitude: bounds[1].longitude - dLongitude};
           //var diameter = Math.max(Math.abs(dLatitude), Math.abs(dLongitude));
           var bbox = [bounds[0].longitude, bounds[0].latitude, bounds[1].longitude, bounds[1].latitude].join(',');
           var center = maps.center();
-          if (state.lastFetch == null || state.stopsFetchedFor.indexOf(bbox) == -1 && shouldFetchStops(bounds, state.lastFetch, center)) {
-              state.lastFetch = maps.center();
-              state.stopsFetchedFor.push(bbox);
+          if (lastFetchedLocation == null || mapState.stopsFetchedFor.indexOf(bbox) == -1 && shouldFetchStops(bounds, lastFetchedLocation, center)) {
+              mapState.stopsFetchedFor.push(bbox);
               busAPI().get(busAPI().STOPS_AREA, {limit: 500, center_coordinate: center.longitude + ',' + center.latitude, diameter: 2000}, function(json) {
                   json = json == '' ? [] : json;
                   var opts = {icon: icons.stop};
                   if (json.length > 10)
-                      opts.animation = null; // iOS7 crashes with many simultaneous animations...
+                      opts.animation = null; // iOS7 crashes with many simultaneous GMaps animations...
                   json.forEach(function(stop) {
-                      if (!state.stopMarkers[stop.code]) {
+                      if (!mapState.stopMarkers[stop.code]) {
                           var coords = busAPI().parseCoordinates(stop.coords);
                           var stopMarker = maps.newMarker(stop.code + ' ' + stop.name, coords, opts);
                           stopMarker.code = stop.code;
-                          state.stopMarkers[stop.code] = stopMarker;
-                          maps.on('click', stopMarker, function(e) {
-                              e.stop();
-                              if (state.selected) maps.stopAnimation(state.selected);
-                              state.selected = stopMarker;
+                          mapState.stopMarkers[stop.code] = stopMarker;
+                          maps.on(maps.events.marker.CLICK, stopMarker, function(e) {
+                              if (e.stop) e.stop();
+                              if (mapState.selected) maps.stopAnimation(mapState.selected);
+                              mapState.selected = stopMarker;
                               maps.animate(stopMarker);
                               body().stop.departures().innerHTML = '';
                               body().stop.H3().innerHTML = stop.code + ' ' + stop.name;
@@ -262,45 +293,58 @@
                   });
               });
           }
+          return center;
       };
 
-      var updateBuses = function() {
-          if (!state.updatingBuses && nearerToTampere(maps.center())) {
-              state.updatingBuses = true;
-              try {
-                siriAPI.get(siriAPI.ALL_VEHICLES(), function(d) {
-                    var activity = d.Siri.ServiceDelivery.VehicleMonitoringDelivery.VehicleActivity
-                    if (!(activity instanceof Array))
-                        activity = [activity];
-                    activity.forEach(function(a) {
-                        var vehicle = a.MonitoredVehicleJourney.VehicleRef;
-                        var line = a.MonitoredVehicleJourney.LineRef;
-                        var direction = a.MonitoredVehicleJourney.DirectionRef;
-                        var coords = a.MonitoredVehicleJourney.VehicleLocation;
-                        var origin = a.MonitoredVehicleJourney.OriginName;
-                        var destination = a.MonitoredVehicleJourney.DestinationName;
-                        var busMarker = state.busMarkers[vehicle];
-                        if (!busMarker) {
-                            logger.log('Adding bus ' + vehicle + ' to: ' + coords);
-                            busMarker = maps.newMarker(line + ': ' + origin + ' -> ' + destination, coords, {icon: icons.number(line.replace(/[^0-9]/g, '')), zIndex: 500});
-                            state.busMarkers[vehicle] = busMarker;
-                            maps.on('click', busMarker, function(e) {
-                                if (state.selected) maps.stopAnimation(state.selected);
-                                maps.animate(busMarker);
-                                state.selected = busMarker;
-                                messaging.addInfo('Line ' + line + ': ' + origin + ' -> ' + destination);
-                                updateLineRoute(line + ' ' + direction);
-                            });
-                        } else {
-                            maps.moveMarker(busMarker, coords);
-                        }
-                    });
-                    state.updatingBuses = false;
-                });
-              } catch (e) {
-                  state.updatingBuses = false;
-                  throw e;
-              }
+      var within = function(coords, bounds) {
+          var sw = bounds[0];
+          var ne = bounds[1];
+          return coords.latitude >= sw.latitude && coords.latitude <= ne.latitude &&
+                 coords.longitude >= sw.longitude && coords.longitude <= ne.longitude;
+      };
+
+      var updateBuses = function(maps, mapState) {
+          if (nearerToTampere(maps.center()) /* don't bother trying in other cities... */) {
+              //siriAPI.get(siriAPI.ALL_VEHICLES(), function(_) {
+              siriRTAPI.get(function(_) {
+                  var delivery = _.Siri.ServiceDelivery.VehicleMonitoringDelivery;
+                  if (!(delivery instanceof Array))
+                      delivery = [delivery];
+                  delivery.forEach(function(_) {
+                      var activity = _.VehicleActivity;
+                      if (!(activity instanceof Array))
+                          activity = [activity];
+                      activity.forEach(function(_) {
+                          var vehicle = _.MonitoredVehicleJourney.VehicleRef.value;
+                          var line = _.MonitoredVehicleJourney.LineRef.value;
+                          var coords = _.MonitoredVehicleJourney.VehicleLocation;
+                          var busMarker = mapState.busMarkers[vehicle];
+                          if (!busMarker) {
+                              var direction = _.MonitoredVehicleJourney.DirectionRef.value;
+                              var origin = _.MonitoredVehicleJourney.OriginName.value;
+                              var destination = _.MonitoredVehicleJourney.DestinationName.value;
+
+                              logger.log('Adding bus ' + vehicle + ' to: ' + coords);
+                              busMarker = maps.newMarker(line + ': ' + origin + ' -> ' + destination, coords, {icon: icons.number(line.replace(/[^0-9]/g, '')), zIndex: 500});
+                              busMarker.line = line;
+                              mapState.busMarkers[vehicle] = busMarker;
+                              maps.on(maps.events.marker.CLICK, busMarker, function(e) {
+                                  if (mapState.selected) maps.stopAnimation(mapState.selected);
+                                  maps.animate(busMarker);
+                                  mapState.selected = busMarker;
+                                  messaging.addInfo('Line ' + line + ': ' + origin + ' -> ' + destination);
+                                  updateLineRoute(line + ' ' + direction, maps, mapState);
+                              });
+                          } else {
+                              var bounds = maps.bounds();
+                              if (bounds && within(coords, bounds) || within(maps.position(busMarker), bounds)) {
+                                  console.log('Moving bus ' + line);
+                                  maps.moveMarker(busMarker, coords);
+                              }
+                          }
+                      });
+                  });
+              });
           }
       };
 
@@ -308,19 +352,24 @@
           var recordedAt = new Date(_.RecordedAtTime);
           var validUntil = new Date(_.ValidUntilTime);
           var text = _.Content;
-          var msgId = _.InfoMessageIdentifier;
           var validMs = validUntil.getTime() - (new Date()).getTime();
-          if (!state.shownMessages[msgId]) {
-              messaging.addWarn(recordedAt.toLocaleDateString() + ' ' + recordedAt.toLocaleTimeString() + ': ' + text, {delayMs: Math.min(validMs, messageUpdateIntervalMs)});
-              state.shownMessages[msgId] = true;
-          }
+          
+          messaging.addWarn(recordedAt.toLocaleDateString() + ' ' + recordedAt.toLocaleTimeString() + ': ' + text, {
+            delayMs: Math.min(validMs, messageUpdateIntervalMs)
+          });
       };
-      var updateMessages = function() {
+      var updateMessages = function(shownMessages) {
           siriAPI.get(siriAPI.ALL_MESSAGES(), function(_) {
               var msgs = _.Siri.ServiceDelivery.GeneralMessageDelivery.GeneralMessage;
               if (msgs && !(msgs instanceof Array))
                   msgs = [msgs];
-              (msgs || []).forEach(showMessage);
+              (msgs || []).forEach(function(_) {
+                  var msgId = _.InfoMessageIdentifier;
+                  if (!shownMessages[msgId]) {
+                      showMessage(_);
+                      shownMessages[msgId] = true;
+                  }
+              });
           });
       };
 
@@ -332,13 +381,13 @@
           return c1.longitude == c2.longitude && c1.latitude == c2.latitude || dx > width/5.0 || dy > height / 5.0;
       };
 
-      var updateLocation = function(loc) {
+      var updateLocation = function(loc, oldLoc, maps, mapState, followMe) {
           logger.log("updateLocation: " + JSON.stringify(loc));
-          if (state.myLocation == null || loc.accuracy < state.myLocation.accuracy || loc.timestamp - state.myLocation.timestamp > 1000) {
+          if (oldLoc == null || loc.accuracy < oldLoc.accuracy || loc.timestamp - oldLoc.timestamp > 1000) {
               state.myLocation = loc;
-              maps.moveMarker(state.me, loc.coords);
-              if (state.followMe)
-                  maps.centerTo(state.myLocation ? state.myLocation.coords : tampereCoordinates);
+              maps.moveMarker(mapState.me, loc.coords);
+              if (followMe)
+                  maps.centerTo(loc.coords);
           }
       };
 
@@ -357,26 +406,114 @@
           maps.stopAnimation(state.selected);
       });
 
+      var initMaps = function(type, initialLocation) {
+          var maps;
+          if (type == 'google') {
+              maps = gmapshelper(document.getElementById('map-canvas'), document.getElementById('map-search'));
+              maps.centerTo(initialLocation);
+          } else if (type == 'bing') {
+              maps = bingmapshelper(body()['map-canvas'](), {map: {center: initialLocation, credentials: 'Aji7Whwv3vWGwS2X4HAqZTWJjF0z159P1yOBHxzXqa7Ri6zOG_NefNXuQLCKPhHj'}});
+          }
+
+          var mapState = {
+            selected: undefined,
+            busMarkers: {},
+            stopMarkers: {},
+            lineShapes: [],
+            stopsFetchedFor: [],
+            me: maps.newMarker("That's me there!", {latitude: 0, longitude: 0}, {zIndex: 1000})
+          };
+
+          var nearByStopUpdater = function() {
+            state.lastFetchedLocation = updateNearByBusStops(maps, mapState, state.lastFetchedLocation);
+          };
+          maps.on(maps.events.map.BOUNDS_CHANGED, maps, nearByStopUpdater);
+          maps.on(maps.events.map.ZOOM_CHANGED, maps, nearByStopUpdater);
+          setTimeout(nearByStopUpdater, 1000);
+
+          maps.on(maps.events.marker.CLICK, mapState.me, function() {
+            state.followMe = true;
+            maps.centerTo(state.myLocation.coords);
+          });
+          maps.on(maps.events.map.DRAG_START, maps, function() {
+            state.followMe = false;
+            messaging.addInfoOnce("Click self marker to follow own location.");
+          });
+
+          var distance = function(a,b) {
+            return Math.sqrt(Math.pow(b.latitude - a.latitude, 2) + Math.pow(b.longitude - a.longitude, 2));
+          };
+
+          maps.on(maps.events.search.CHANGED, maps, function() {
+            var str = maps.searchString();
+            if (str != '') {
+              var matchingBuses = [];
+              for (var p in mapState.busMarkers)
+                if (mapState.busMarkers[p].line == str || mapState.busMarkers[p].line.replace(/\D/g,'') == str)
+                  matchingBuses.push(mapState.busMarkers[p]);
+              var ownLocation = state.myLocation.coords;
+
+              matchingBuses.sort(function(a,b) {
+                return distance(ownLocation, maps.position(a)) - distance(ownLocation, maps.position(b));
+              });
+              if (matchingBuses.length > 0) {
+                state.followMe = false;
+                ui.hide(dom.process(document.body)['pac-container']());
+                maps.centerTo(maps.position(matchingBuses[0]));
+              }
+            }
+          });
+
+          return {
+            mapState: mapState,
+            maps: maps
+          };
+      };
+
+      body().mapchange().onclick = function() {
+          var selected = body().mapchange.selected();
+          var newMaps = initMaps(selected.getAttribute('data-target'), maps.center());
+          newMaps.maps.zoomTo(maps.zoom());
+
+          body().mapchange.img.forEach(function(_) {
+              _().classList.add('selected');
+          });
+          selected.classList.remove('selected');
+          maps = newMaps.maps;
+          state.mapState = newMaps.mapState;
+      };
+
       var initialize = function() {
-          maps.centerTo(state.myLocation ? state.myLocation.coords : tampereCoordinates);
+          messaging.addInfoOnce('Bus stop data for Tampere/Helsinki.<br>Real-time data for Tampere.<br>Thanks for the icons: http://mapicons.nicolasmollet.com/', {delayMs: 3000, escape: false});
 
-          state.me = maps.newMarker("That's me there!", {latitude: 0, longitude: 0}, {icon: maps.icons.BLUE_DOT, zIndex: 1000});
+          setTimeout(function() {
+              ui.show(body().mapchange());
+          }, 2000);
+          setTimeout(function() {
+              messaging.addInfoOnce('Change map type from the bottom of the screen');
+          }, 4000);
 
-          maps.on('bounds_changed', maps, updateNearByBusStops);
-          maps.on('zoom_changed', maps, updateNearByBusStops);
+          var newMaps = initMaps('google', tampereCoordinates);
+          maps = newMaps.maps;
+          state.mapState = newMaps.mapState;
 
-          maps.on('click', state.me, function() {state.followMe = true; maps.centerTo(state.myLocation.coords);});
-          maps.on('dragend', maps, function() {state.followMe = false; messaging.addInfoOnce("Click self marker to follow own location.");});
+          var locationUpdater = function(loc) {
+              updateLocation(loc, state.myLocation, maps, state.mapState, state.followMe);
+              state.myLocation = loc;
+          };
+          navigator.geolocation.getCurrentPosition(locationUpdater, locationError, {maximumAge:Infinity, timeout:0});
+          navigator.geolocation.watchPosition(locationUpdater, locationError);
+          navigator.geolocation.watchPosition(locationUpdater, locationError, {enableHighAccuracy: true});
 
-          navigator.geolocation.getCurrentPosition(updateLocation, locationError, {maximumAge:Infinity, timeout:0});
-          navigator.geolocation.watchPosition(updateLocation, locationError);
-          navigator.geolocation.watchPosition(updateLocation, locationError, {enableHighAccuracy: true});
-
-          setInterval(updateMessages, messageUpdateIntervalMs);
+          var messageUpdater = function() {
+              updateMessages(state.shownMessages);
+          };
+          setInterval(messageUpdater, messageUpdateIntervalMs);
           
-          setTimeout(function() { setInterval(updateBuses, 3000); }, 5000);
-
-          messaging.addInfoOnce('Bus stop data for Tampere/Helsinki.<br>Real-time data for Tampere.<br>Thanks for the icons: http://mapicons.nicolasmollet.com/', {delayMs: 5000, escape: false});
+          var busUpdater = function() {
+              updateBuses(maps, state.mapState);
+          };
+          setTimeout(function() { setInterval(busUpdater, 3000); }, 3000);
       }
     </script>
 </body>
