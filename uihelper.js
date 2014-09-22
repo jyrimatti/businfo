@@ -28,6 +28,14 @@ var uihelper = function(options) {
                     onFinished();
             }, defaultOptions.animationDurationMs);
             return element;
+        },
+
+        visible: function(element) {
+            return !ret.hidden(element);
+        },
+
+        hidden: function(element) {
+            return element.classList.contains(defaultOptions.hiddenClassName);
         }
     };
     return ret;

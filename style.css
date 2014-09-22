@@ -6,8 +6,10 @@ body { height: 100%; margin: 0; padding: 0 }
 #notifications .warn { color: #FF7400; background-color: #FFC973; border-color: #FF7400; }
 #notifications .info { color: #0D5385; background-color: #74C6FF; border-color: #0D5385; }
 #map-canvas { height: 100% }
-#map-search { margin: 0; width: 33% !important; max-width: 300px;}
-.pac-container { width: 33% !important; max-width: 300px; top: auto !important; bottom: 21px !important; }
+#map-search { margin: 0; z-index: 9999999 !important; min-width: 140px; }
+.pac-container { top: auto !important; bottom: 21px !important; left: 0 !important; width: 100% !important; }
+.pac-container img { height: 30px; }
+.pac-container .bus { line-height: normal; }
 #stop { padding: 0.5em; min-width: 10em; max-height: 100%; min-height: 25%; overflow-y: scroll; position: absolute; right: 0; bottom: 0; background-color: white; opacity: 0.9; z-index: 5000; border-radius: 0.5em 0 0 0; }
 #stop h3 { width: 100%; margin: 0;}
 table { font-weight: normal; padding-right: 5px; border-collapse: collapse; }
