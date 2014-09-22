@@ -36,7 +36,7 @@
               <tr data-bind="etd"><th data-bind="code"></th><td data-bind="time"></td><td data-bind="estimate"><em>(<span></span>min)</em></td></tr>
               <tr data-bind="noLineData"><td><em>no line data</em></td></tr>
               <tr data-bind="showLine">
-                  <td class="code"><a href="#showLine" onclick="updateLineRoute(this.textContent, maps, state.mapState)"></a></td>
+                  <td class="code"><a href="#showLine" onclick="bushelper.updateLineRoute(this.textContent, maps, state.mapState)"></a></td>
                   <td class="text"></td>
               </tr>
           </table>
@@ -53,42 +53,19 @@
    <script type="text/javascript" src="http://code.jquery.com/mobile/1.3.1/jquery.mobile-1.3.1.min.js"></script>
    <script type="text/javascript" src="https://maps.googleapis.com/maps/api/js?key=AIzaSyC1HE7ysGzolLTIP3ZN1JBDmsfbFh54NeY&sensor=true&libraries=places"></script>
    <script charset="UTF-8" type="text/javascript" src="http://ecn.dev.virtualearth.net/mapcontrol/mapcontrol.ashx?v=7.0"></script>
-   <script type="text/javascript" src="/bus/domhelper.js"></script>
-   <script type="text/javascript" src="/bus/xmlhelper.js"></script>
-   <script type="text/javascript" src="/bus/logger.js"></script>
-   <script type="text/javascript" src="/bus/sirihelper.js"></script>
-   <script type="text/javascript" src="/bus/cgihelper.js"></script>
-   <script type="text/javascript" src="/bus/gmapshelper.js"></script>
-   <script type="text/javascript" src="/bus/bingmapshelper.js"></script>
-   <script type="text/javascript" src="/bus/uihelper.js"></script>
-   <script type="text/javascript" src="/bus/messaginghelper.js"></script>
+   <script type="text/javascript" src="config.js"></script>
+   <script type="text/javascript" src="util.js"></script>
+   <script type="text/javascript" src="bushelper.js"></script>
+   <script type="text/javascript" src="domhelper.js"></script>
+   <script type="text/javascript" src="xmlhelper.js"></script>
+   <script type="text/javascript" src="logger.js"></script>
+   <script type="text/javascript" src="sirihelper.js"></script>
+   <script type="text/javascript" src="cgihelper.js"></script>
+   <script type="text/javascript" src="gmapshelper.js"></script>
+   <script type="text/javascript" src="bingmapshelper.js"></script>
+   <script type="text/javascript" src="uihelper.js"></script>
+   <script type="text/javascript" src="messaginghelper.js"></script>
    <script type="text/javascript">
-      var tklConfig = {
-          url: 'http://lahteenmaki.net/xdm?http://api.publictransport.tampere.fi/1_0_2/',
-          username: 'businfo',
-          password: 'businfo'
-      }
-      var hslConfig = {
-          url: 'http://lahteenmaki.net/xdm?http://api.reittiopas.fi/hsl/prod/',
-          username: 'businfo',
-          password: 'businfo'
-      }
-      var siriConfig = {
-          application_id: 'businfo',
-          url: 'http://lahteenmaki.net/xdm?https://siri.ij2010.tampere.fi/ws',
-          username: 'its_factory_temp',
-          password: 'ITS4devN'
-      }
-      var siriRTConfig = {
-          url: 'http://lahteenmaki.net/xdm?http://data.itsfactory.fi/siriaccess/vm/json'
-      }
-      var tampereCoordinates = {latitude: 61.4981, longitude: 23.760};
-      var helsinkiCoordinates = {latitude: 60.1675763, longitude: 24.9417421}
-
-      var messageUpdateIntervalMs = 1000*60*5;
-      var busUpdateIntervalMs = 1000*5;
-      var stopUpdateIntervalMs = 1000*30;
-
       var state = {
           myLocation: null,
           followMe: true,
@@ -109,43 +86,30 @@
           shownMessages: {}
       };
 
-      var icons = {
-          number: function(num) {
-              return '/bus/icons/number_' + num + '.png';
-          },
-          stop: '/bus/icons/busstop.png'
-      };
-      var distanceBetween = function(coord1, coord2) {
-          return Math.sqrt(Math.pow(coord1.latitude - coord2.latitude, 2) + Math.pow(coord1.longitude - coord2.longitude, 2));
-      };
-      var nearerToTampere = function(loc) {
-          var dTampere = distanceBetween(loc, tampereCoordinates);
-          var dHelsinki = distanceBetween(loc, helsinkiCoordinates);
-          return dTampere < dHelsinki;
-      };
-
+      var config = config();
       var dom = domhelper();
       var xml = xmlhelper();
       var logger = logger();
       var ui = uihelper();
-
+      var util = util(config.tampereCoordinates, config.helsinkiCoordinates);
+      
       var body = function() {return dom.process(document.getElementById('content')); };
       var templates = body().templates;
 
-      var maps;
       var messaging = messaginghelper(body().notifications(), ui);
+      var maps;
 
-      var siriAPI = sirihelper(xml, logger, siriConfig);
-      var tklAPI = cgihelper(logger, tklConfig);
-      var hslAPI = cgihelper(logger, hslConfig);
+      var siriAPI = sirihelper(xml, logger, config.siri);
+      var tklAPI = cgihelper(logger, config.tkl);
+      var hslAPI = cgihelper(logger, config.hsl);
       var busAPI = function() {
-          return nearerToTampere(maps.center()) ? tklAPI : hslAPI;
+          return util.nearerToTampere(maps.center(), config.tampereCoordinates, config.helsinkiCoordinates) ? tklAPI : hslAPI;
       };
       // itsfactory published all-vehicles RT data also as a separate json service...
       var siriRTAPI = {
           get: function(onSuccess) {
             $.ajax({
-                url: siriRTConfig.url,
+                url: config.siriRT.url,
                 dataType: 'json',
                 contentType: 'application/json;charset=utf-8',
                 timeout: 7500,
@@ -157,6 +121,8 @@
           }
       };
 
+      var bushelper = bushelper(logger, ui, util, messaging, busAPI, siriAPI, siriRTAPI, config, body, templates.table.tbody);
+
       body().stop.tabs.li.forEach(function(_) {
           _().onclick = function(e) {
               if (!this.classList.contains('selected')) {
@@ -165,243 +131,43 @@
                   this.classList.add('selected');
                   ui.hide(document.getElementById(selected.dataset.bind));
                   ui.show(document.getElementById(this.dataset.bind));
-                  updateStopBuses(state.mapState.selectedStop);
+                  bushelper.updateStopBuses(state.mapState.selectedStop);
               }
           };
       });
 
-      var updateLineRoute = function(code, maps, mapState) {
-          mapState.lineShapes.forEach(maps.remove);
-          busAPI().get(busAPI().LINES, {p: '10000001', query: code}, function(json) {
-              json = json == '' ? [] : json;
-              mapState.lineShapes = json.filter(function(_) {return _.code == code;}).map(function(_) {
-                  var coords = busAPI().parseLineShape(_.line_shape);
-                  logger.log('Drawing polyline of length: ' + coords.length);
-                  return maps.newPolyline(coords);
-              });
+      $(body().stop()).on('swipe', function() {
+          ui.hideAnimated(body().stop());
+          var selectedStop = state.mapState.stopMarkers[state.mapState.selectedStop];
+          if (selectedStop)
+              maps.stopAnimation(selectedStop);
+          state.mapState.selectedStop = undefined;
+      });
+
+      body().mapchange().onclick = function() {
+          var selected = body().mapchange.selected();
+          var newMaps = initMaps(selected.getAttribute('data-target'), maps.center());
+          newMaps.maps.zoomTo(maps.zoom());
+
+          body().mapchange.img.forEach(function(_) {
+              _().classList.add('selected');
           });
-          return false;
-      }
-
-      var updateStopBuses = function(code) {
-          var updateStopDepartures = function() {
-              body().stop.departures().innerHTML = templates.table.tbody.spinner({});
-              busAPI().get(busAPI().STOP, {p: '00000000001', code: code}, function(json) {
-                  json = json instanceof Array ? json[0] : json;
-                
-                  if (!json.departures || json.departures.length == 0) {
-                      body().stop.departures().innerHTML = templates.table.tbody.noDepartureData({});
-                  } else {
-                      var rows = json.departures.map(function (_) {
-                          var stamp = busAPI().parseDate(_.date);
-                          var time = busAPI().parseTime(_.time);
-                          stamp.setHours(time.hours);
-                          stamp.setMinutes(time.minutes);
-                          var now = new Date();
-                          var etd = Math.floor((stamp - now)/1000/60 + time.days*24*60);
-                          etd = etd < 0 ? 0 : etd;
-                          return templates.table.tbody.etd({
-                              code: _.code,
-                              time: time.toString(),
-                              estimate: {
-                                  em: {
-                                      span: etd
-                                  }
-                              }
-                          });
-                      });
-                      body().stop.departures().innerHTML = rows.join('');
-                  }
-              });
-          };
-
-          var updateStopGPS = function() {
-              body().stop.gps().innerHTML = templates.table.tbody.spinner({});
-              siriAPI.get(siriAPI.STOP(code), function(_) {
-                  var visits = _.Siri.ServiceDelivery.StopMonitoringDelivery.MonitoredStopVisit;
-                  if (!visits) {
-                      body().stop.gps().innerHTML = templates.table.tbody.noDepartureData({});
-                  } else {
-                      visits = visits instanceof Array ? visits : [visits];
-                      var rows = visits.map(function(_) {
-                          var lineRef = _.MonitoredVehicleJourney.LineRef;
-                          var origin = _.MonitoredVehicleJourney.OriginName;
-                          var destination = _.MonitoredVehicleJourney.DestinationName;
-                          var vehicleRef = _.MonitoredVehicleJourney.VehicleRef;
-
-                          var stamp = new Date(_.MonitoredVehicleJourney.MonitoredCall.ExpectedDepartureTime);
-                          var now = new Date();
-                          var etd = Math.floor((stamp.getTime() - now.getTime())/1000/60);
-                          
-                          return templates.table.tbody.etd({
-                              code: lineRef,
-                              time: stamp.getHours() + ':' + stamp.getMinutes(),
-                              estimate: {
-                                  em: {
-                                      span: etd
-                                  }
-                              }
-                          });
-                      });
-                      body().stop.gps().innerHTML = rows.join('');
-                  }
-              });
-          };
-
-          var updateStopLines = function() {
-              body().stop.lines().innerHTML = templates.table.tbody.spinner({});
-              busAPI().get(busAPI().STOP, {p: '0000001', code: code}, function(json) {
-                  json = json instanceof Array ? json[0] : json;
-
-                  if (!json.lines || json.lines.length == 0) {
-                      body().stop.lines().innerHTML = templates.table.tbody.noLineData({});
-                  } else {
-                      var rows = json.lines.map(function(_) {
-                          var lineCode = _.substr(0, _.indexOf(':'));
-                          var route = _.substr(_.indexOf(':')+1); 
-                          return templates.table.tbody.showLine({
-                              code: {
-                                  a: lineCode
-                              },
-                              text: route
-                          });
-                      });
-                      body().stop.lines().innerHTML = rows.join('');
-                  }
-              });
-          };
-
-          if (ui.visible(body().stop.departures())) {
-              updateStopDepartures();
-          }
-          if (ui.visible(body().stop.gps())) {
-              updateStopGPS();
-          }
-          if (ui.visible(body().stop.lines())) {
-              updateStopLines();
-          }
+          selected.classList.remove('selected');
+          maps = newMaps.maps;
+          state.mapState = newMaps.mapState;
       };
 
-      var updateNearByBusStops = function(maps, mapState, lastFetchedLocation) {
-          var bounds = maps.bounds();
-          if (!bounds)
-              return lastFetchedLocation;
-          var bbox = [bounds[0].longitude, bounds[0].latitude, bounds[1].longitude, bounds[1].latitude].join(',');
-          var center = maps.center();
-          if (lastFetchedLocation == null || mapState.stopsFetchedFor.indexOf(bbox) == -1 && shouldFetchStops(bounds, lastFetchedLocation, center)) {
-              mapState.stopsFetchedFor.push(bbox);
-              busAPI().get(busAPI().STOPS_AREA, {limit: 500, center_coordinate: center.longitude + ',' + center.latitude, diameter: 2000}, function(json) {
-                  json = json == '' ? [] : json;
-                  var opts = {icon: icons.stop};
-                  if (json.length > 10)
-                      opts.animation = null; // iOS7 crashes with many simultaneous GMaps animations...
-                  json.forEach(function(stop) {
-                      if (!mapState.stopMarkers[stop.code]) {
-                          var coords = busAPI().parseCoordinates(stop.coords);
-                          var stopMarker = maps.newMarker(stop.code + ' ' + stop.name, coords, opts);
-
-                          var stopClicked = function(e) {
-                              if (e.stop) e.stop();
-                              if (mapState.selectedStop) {
-                                  maps.stopAnimation(mapState.stopMarkers[mapState.selectedStop]);
-                                  if (mapState.selectedStop == stop.code) {
-                                      mapState.selectedStop = undefined;
-                                      ui.hideAnimated(body().stop());
-                                      return;
-                                  }
-                              }
-                              mapState.selectedStop = stop.code;
-                              maps.animate(stopMarker);
-                              body().stop.H3().innerHTML = stop.code + ' ' + stop.name;
-                              ui.show(body().stop());
-                              messaging.addInfoOnce('Swipe right to hide stop info.');
-                              updateStopBuses(stop.code);
-                          };
-
-                          stopMarker.code = stop.code;
-                          mapState.stopMarkers[stop.code] = stopMarker;
-                          maps.on(maps.events.marker.CLICK, stopMarker, stopClicked);
-                      }
-                  });
-              });
-          }
-          return center;
-      };
-
-      var within = function(coords, bounds) {
-          var sw = bounds[0];
-          var ne = bounds[1];
-          return coords.latitude >= sw.latitude && coords.latitude <= ne.latitude &&
-                 coords.longitude >= sw.longitude && coords.longitude <= ne.longitude;
-      };
-
-      var updateBuses = function(maps, mapState) {
-          if (nearerToTampere(maps.center()) /* don't bother trying in other cities... */) {
-              siriRTAPI.get(function(_) {
-                  var delivery = _.Siri.ServiceDelivery.VehicleMonitoringDelivery;
-                  if (!(delivery instanceof Array))
-                      delivery = [delivery];
-                  delivery.forEach(function(_) {
-                      var activity = _.VehicleActivity;
-                      if (!(activity instanceof Array))
-                          activity = [activity];
-                      activity.forEach(function(_) {
-                          var vehicle = _.MonitoredVehicleJourney.VehicleRef.value;
-                          var line = _.MonitoredVehicleJourney.LineRef.value;
-                          var coords = _.MonitoredVehicleJourney.VehicleLocation;
-                          var busMarker = mapState.busMarkers[vehicle];
-
-                          if (!busMarker) {
-                              var direction = _.MonitoredVehicleJourney.DirectionRef.value;
-                              var origin = _.MonitoredVehicleJourney.OriginName.value;
-                              var destination = _.MonitoredVehicleJourney.DestinationName.value;
-
-                              var busClicked = function() {
-                                  if (mapState.selectedBus) {
-                                      maps.stopAnimation(mapState.busMarkers[mapState.selectedBus]);
-                                      if (mapState.selectedBus == vehicle) {
-                                          mapState.selectedBus = undefined;
-                                          return;
-                                      }
-                                  }
-                                  state.followMe = false;
-                                  maps.animate(busMarker);
-                                  mapState.selectedBus = vehicle;
-                                  messaging.addInfo('Line ' + line + ': ' + origin + ' -> ' + destination);
-                                  updateLineRoute(line + ' ' + direction, maps, mapState);
-                              };
-
-                              logger.log('Adding bus ' + vehicle + ' to: ' + coords);
-                              busMarker = maps.newMarker(origin + ' -> ' + destination, coords, {icon: icons.number(line.replace(/[^0-9]/g, '')), zIndex: 500});
-                              busMarker.line = line;
-                              mapState.busMarkers[vehicle] = busMarker;
-                              maps.on(maps.events.marker.CLICK, busMarker, busClicked);
-                          } else {
-                              var bounds = maps.bounds();
-                              if (bounds && within(coords, bounds) || within(maps.position(busMarker), bounds)) {
-                                  console.log('Moving bus ' + line);
-                                  maps.moveMarker(busMarker, coords);
-                                  if (!state.followMe && vehicle == mapState.selectedBus)
-                                      maps.centerTo(coords);
-                              }
-                          }
-                      });
-                  });
-              });
-          }
-      };
-
-      var showMessage = function(_) {
-          var recordedAt = new Date(_.RecordedAtTime);
-          var validUntil = new Date(_.ValidUntilTime);
-          var text = _.Content;
-          var validMs = validUntil.getTime() - (new Date()).getTime();
-          
-          messaging.addWarn(recordedAt.toLocaleDateString() + ' ' + recordedAt.toLocaleTimeString() + ': ' + text, {
-            delayMs: Math.min(validMs, messageUpdateIntervalMs)
-          });
-      };
       var updateMessages = function(shownMessages) {
+          var showMessage = function(msg) {
+              var recordedAt = new Date(msg.RecordedAtTime);
+              var validUntil = new Date(msg.ValidUntilTime);
+              var text = msg.Content;
+              var validMs = validUntil.getTime() - (new Date()).getTime();
+              
+              messaging.addWarn(recordedAt.toLocaleDateString() + ' ' + recordedAt.toLocaleTimeString() + ': ' + text, {
+                delayMs: Math.min(validMs, config.messageUpdateIntervalMs)
+              });
+          };
           siriAPI.get(siriAPI.ALL_MESSAGES(), function(_) {
               var msgs = _.Siri.ServiceDelivery.GeneralMessageDelivery.GeneralMessage;
               if (msgs && !(msgs instanceof Array))
@@ -414,14 +180,6 @@
                   }
               });
           });
-      };
-
-      var shouldFetchStops = function(mapBounds, c1, c2) {
-          var width = mapBounds[1].longitude - mapBounds[0].longitude;
-          var height = mapBounds[1].latitude - mapBounds[0].latitude;
-          var dx = Math.abs(c1.longitude - c2.longitude);
-          var dy = Math.abs(c1.latitude - c2.latitude);
-          return c1.longitude == c2.longitude && c1.latitude == c2.latitude || dx > width/10.0 || dy > height / 10.0;
       };
 
       var updateLocation = function(loc, oldLoc, maps, mapState, followMe) {
@@ -448,32 +206,13 @@
           }
       };
 
-      $(body().stop()).on('swipe', function() {
-          ui.hideAnimated(body().stop());
-          var selectedStop = state.mapState.stopMarkers[state.mapState.selectedStop];
-          if (selectedStop)
-              maps.stopAnimation(selectedStop);
-          state.mapState.selectedStop = undefined;
-      });
-
-      var distanceKm = function(point1, point2) {
-        var deg2rad = function(deg) {
-          return deg * (Math.PI/180)
-        }
-
-        var dLat = deg2rad(point2.latitude-point1.latitude);
-        var dLon = deg2rad(point2.longitude-point1.longitude); 
-        var a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(deg2rad(point1.latitude)) * Math.cos(deg2rad(point2.latitude)) * Math.sin(dLon/2) * Math.sin(dLon/2); 
-        return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      }
-
       var initMaps = function(type, initialLocation) {
           var maps;
           if (type == 'google') {
               maps = gmapshelper(document.getElementById('map-canvas'), document.getElementById('map-search'));
               maps.centerTo(initialLocation);
           } else if (type == 'bing') {
-              maps = bingmapshelper(body()['map-canvas'](), {map: {center: initialLocation, credentials: 'Aji7Whwv3vWGwS2X4HAqZTWJjF0z159P1yOBHxzXqa7Ri6zOG_NefNXuQLCKPhHj'}});
+              maps = bingmapshelper(body()['map-canvas'](), {map: {center: initialLocation, credentials: config.bingCredentials}});
           }
 
           var mapState = {
@@ -487,7 +226,7 @@
           };
 
           var nearByStopUpdater = function() {
-            state.lastFetchedLocation = updateNearByBusStops(maps, mapState, state.lastFetchedLocation);
+            state.lastFetchedLocation = bushelper.updateNearByBusStops(maps, mapState, state.lastFetchedLocation);
           };
           maps.on(maps.events.map.BOUNDS_CHANGED, maps, nearByStopUpdater);
           maps.on(maps.events.map.ZOOM_CHANGED, maps, nearByStopUpdater);
@@ -502,10 +241,6 @@
             messaging.addInfoOnce("Click self marker to follow own location.");
           });
 
-          var distance = function(a,b) {
-            return Math.sqrt(Math.pow(b.latitude - a.latitude, 2) + Math.pow(b.longitude - a.longitude, 2));
-          };
-
           maps.on(maps.events.search.CHANGED, maps, function() {
             var str = maps.searchString();
             var ownLocation = state.myLocation ? state.myLocation.coords : undefined;
@@ -518,13 +253,13 @@
                   matchingBuses.push(p);
               
               matchingBuses.sort(function(a,b) {
-                return distance(ownLocation, maps.position(mapState.busMarkers[a])) - distance(ownLocation, maps.position(mapState.busMarkers[b]));
+                return util.distance(ownLocation, maps.position(mapState.busMarkers[a])) - util.distance(ownLocation, maps.position(mapState.busMarkers[b]));
               });
               if (matchingBuses.length > 0) {
                 state.followMe = false;
                 var pacItems = matchingBuses.map(function(_) {
                   var marker = mapState.busMarkers[_];
-                  var distanceToSelf = distanceKm(ownLocation, maps.position(marker));
+                  var distanceToSelf = util.distanceKm(ownLocation, maps.position(marker));
                   var distanceHumanReadable = distanceToSelf > 1.0 ? (Math.round(distanceToSelf*10)/10) + 'km' : Math.round(distanceToSelf*1000) + 'm';
                   return templates.pacItem({icon: '', content: marker.title, description: distanceHumanReadable}, {content: {'data-marker': _}, icon: {src: marker.icon}});
                 });
@@ -541,19 +276,6 @@
           };
       };
 
-      body().mapchange().onclick = function() {
-          var selected = body().mapchange.selected();
-          var newMaps = initMaps(selected.getAttribute('data-target'), maps.center());
-          newMaps.maps.zoomTo(maps.zoom());
-
-          body().mapchange.img.forEach(function(_) {
-              _().classList.add('selected');
-          });
-          selected.classList.remove('selected');
-          maps = newMaps.maps;
-          state.mapState = newMaps.mapState;
-      };
-
       var initialize = function() {
           messaging.addInfoOnce('Bus stop data for Tampere/Helsinki.<br>Real-time data for Tampere.<br>Thanks for the icons: http://mapicons.nicolasmollet.com/', {delayMs: 3000, escape: false});
 
@@ -564,7 +286,7 @@
               messaging.addInfoOnce('Change map type from the bottom of the screen');
           }, 4000);
 
-          var newMaps = initMaps('google', tampereCoordinates);
+          var newMaps = initMaps('google', config.tampereCoordinates);
           maps = newMaps.maps;
           state.mapState = newMaps.mapState;
 
@@ -579,19 +301,19 @@
           var messageUpdater = function() {
               updateMessages(state.shownMessages);
           };
-          setInterval(messageUpdater, messageUpdateIntervalMs);
+          setInterval(messageUpdater, config.messageUpdateIntervalMs);
           
           var busUpdater = function() {
-              updateBuses(maps, state.mapState);
+              bushelper.updateBuses(maps, state.mapState);
           };
-          setTimeout(function() { setInterval(busUpdater, busUpdateIntervalMs); busUpdater(); }, 1000);
+          setTimeout(function() { setInterval(busUpdater, config.busUpdateIntervalMs); busUpdater(); }, 1000);
 
           setTimeout(function() {
               var mapState = state.mapState;
               if (mapState.selectedStop) {
-                  updateStopBuses(mapState.stopMarkers[mapState.selectedStop].code);
+                  bushelper.updateStopBuses(mapState.stopMarkers[mapState.selectedStop].code);
               }
-          }, stopUpdateIntervalMs);
+          }, config.stopUpdateIntervalMs);
       }
     </script>
 </body>
