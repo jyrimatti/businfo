@@ -7,7 +7,7 @@ var gmapshelper = function(canvasElement, searchInput, options) {
         },
         marker: {
             animation: google.maps.Animation.DROP,
-            icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+            icon: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png'
         },
         polyline: {
             strokeColor: '#D1FF00',
@@ -66,9 +66,9 @@ var gmapshelper = function(canvasElement, searchInput, options) {
 
     var ret = {
         icons: {
-            RED_DOT: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
-            BLUE_DOT: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png',
-            GREEN_DOT: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png'
+            RED_DOT: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png',
+            BLUE_DOT: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+            GREEN_DOT: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png'
         },
 
         events: {
